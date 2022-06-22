@@ -2,7 +2,7 @@
 This module handles all TFTP related data structures and 
 methods.
 
-(C) João Galamba, 2022
+(C) João Galamba, Marília Pinho & Rodrigo Sequeira, 2022-06-22
 """
 # pylint: disable=redefined-outer-name
 
@@ -71,31 +71,275 @@ INET4Address = Tuple[str, int]        # TCP/UDP address => IPv4 and port
 ##
 ################################################################################
 
-def get_file(serv_addr: INET4Address, filename: str):
+
+    #####################################
+                #### wrq ####
+
+def put_file(serv_addr: INET4Address, source_name: str, dest_name: str) -> int: 
     """
-    RRQ a file given by filename from a remote TFTP server given
-    by serv_addr.
+    WRQ send a file source_name to a remote TFTP server given
+#     by serv_addr.
     """
-    with open(filename, 'wb') as file:
+
+    with open(source_name, 'rb') as file:
         with socket(AF_INET, SOCK_DGRAM) as sock:
             sock.settimeout(INACTIVITY_TIMEOUT)
-            rrq = pack_rrq(filename)
-            sock.sendto(rrq, serv_addr)
-            next_block_num = 1
+            wrq = pack_wrq(dest_name)
+
+            try:
+                #s_nome, s_ip = get_server_info(serv_addr[0])
+                pass
+            except:
+                raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+            #:yrt
+
+            try:
+                sock.sendto(wrq, serv_addr)
+            except:
+                #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+                raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+            #:yrt
+            
+            block_num_atual = 0
+            tot_len = 0
+            fim_leitura =  False
 
             while True:
-                packet, new_serv_addr = sock.recvfrom(SOCKET_BUFFER_SIZE)
+                try:
+                    packet, new_serv_addr = sock.recvfrom(SOCKET_BUFFER_SIZE)
+                except:
+                    #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+                    raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+                #:yrt
+                
+                opcode = unpack_opcode(packet)
+
+                if opcode == ACK:
+                    block_num = unpack_ack(packet)
+                    if block_num != block_num_atual:
+                        raise ProtocolError(f'Invalid block number {block_num}')
+                    #:fi
+
+                    block_num_atual += 1
+                                        
+                    if fim_leitura:
+                        dat = pack_dat(block_num_atual, '')
+                        try:
+                            sock.sendto(dat, new_serv_addr)
+                        except:
+                            #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+                            raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+                        #:yrt
+
+                        return tot_len
+
+                    else:
+                        data = file.read(MAX_DATA_LEN)
+
+                        dat = pack_dat(block_num_atual, data)
+
+                        try:
+                            sock.sendto(dat, new_serv_addr)
+                        except:
+                            #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+                            raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+                        #:yrt
+
+                        if len(data) == 0:
+                            fim_leitura = True
+                        else:
+                            tot_len += len(data)
+                            
+                            if len(data) < MAX_DATA_LEN:
+                                return tot_len
+                        #:fi
+                    #:fi
+
+                elif opcode == ERR:
+                    raise Err(*unpack_err(packet))
+
+                else: # opcode not in (DAT, ERR):
+                    raise ProtocolError(f'Invalid opcode {opcode}')
+
+            #:fi
+        #: elihw
+    #:htiw
+#:htiw
+
+# def put_file(server_add: INET4Address, , source_name: str, dest_name: str):
+#     """
+#     WRQ send a file source_name to a remote TFTP server given
+#     by serv_addr.
+#     """
+# 1. Abrir ficheiro "source_name" para leitura
+#
+# 2. Criar socket DGRAM
+#
+# 3. Criar e enviar pacote WRQ através do socket
+#
+# 4. Esperar ACK ( é suposto ser um ACK)
+#
+#       Pacote ACK:
+#           .1 Extrair block_number 
+#
+#           .2 SE não for um block_number "esperado": 
+#              SENÃO se block_number "inválido": assinalar erro de protocolo e terminar WRQ
+#
+#       Pacote ERR: Assinalar o erro e terminar WRQ
+#
+#       Outro pacote qq: Assinalar erro de protocolo e terminar WRQ
+#
+#       Se estiver 60s sem obter resposta (ACK) do servidor, 
+#       assinalar erro "Server not responding…" e terminar WRQ
+#
+# 5. Ler 512b do ficheiro e Enviar  próximo pacote DAT: 
+#
+#    .1 Ler do ficheiro
+#
+#    .2 criar pacote DAT, a partir do block_number e dados ficheiro 
+#       NOTA: Se dimensão dos dados múltiplo de MAX_DATA_LEN (512B),
+#       enviar ainda um último DAT, sem dados, para o servidor 
+#       saber que já terminou a transmição.
+#
+#    .3 Enviar pacote DAT
+#
+# 6. Voltar a 4
+#
+#:put_file
+
+    #####################################
+                #### dir ####
+
+def get_dir(serv_addr: INET4Address):
+    """
+    RRQ the list of files and directories from a remote TFTP server given
+    by serv_addr.
+    """
+
+    try:
+        with socket(AF_INET, SOCK_DGRAM) as sock:
+            sock.settimeout(INACTIVITY_TIMEOUT)
+            rrq = pack_dir()
+    except:
+        raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+    #:yrt
+    try:
+        #s_nome, s_ip = get_server_info(serv_addr[0])
+        pass
+    except:
+        raise NetworkError(f"Unknown server: {serv_addr[0]}")
+    #:yrt
+
+    try:
+        sock.sendto(rrq, serv_addr)
+    except:
+        #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+        raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+    #:yrt
+
+    block_num_atual = 1
+    tot_len = 0
+
+    while True:
+        try:
+            packet, new_serv_addr = sock.recvfrom(SOCKET_BUFFER_SIZE)
+        except:
+            #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+            raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+        #:yrt
+        
+        opcode = unpack_opcode(packet)
+
+        if opcode == DAT:
+            block_num, data = unpack_dat(packet)
+            if block_num != block_num_atual:
+                raise ProtocolError(f'Invalid block number {block_num}')
+
+            print(data)
+
+            ack = pack_ack(block_num_atual)
+
+            try:
+                sock.sendto(ack, new_serv_addr)
+            except:
+                #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+                raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+            #:yrt
+
+            tot_len += len(data)
+            if len(data) < MAX_DATA_LEN:
+                print(f"total {tot_len}")
+                break
+
+        elif opcode == ERR:
+            raise Err(*unpack_err(packet))
+
+        else: # opcode not in (DAT, ERR):
+            raise ProtocolError(f'Invalid opcode {opcode}')
+
+        block_num_atual += 1
+        #:fi
+    #: elihw
+#:get_dir
+
+def get_dir_nova(serv_addr: INET4Address):
+    """
+    RRQ the list of files and directories from a remote TFTP server given
+    by serv_addr.
+    (Adaptada, pois não existe a respectiva implmentação do lado do servidor.)
+    """
+    try:
+        with socket(AF_INET, SOCK_DGRAM) as sock:
+            sock.settimeout(INACTIVITY_TIMEOUT)
+            rrq = pack_rrq('dir.txt')
+
+            try:
+                #s_nome, s_ip = get_server_info(serv_addr[0])
+                pass
+            except:
+                raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+            #:yrt
+
+            try:
+                sock.sendto(rrq, serv_addr)
+            except:
+                #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+                raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+            #:yrt
+            
+            block_num_atual = 1
+            tot_len = 0
+
+            while True:
+                try:
+                    packet, new_serv_addr = sock.recvfrom(SOCKET_BUFFER_SIZE)
+                except:
+                    #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+                    raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+                #:yrt
+                
                 opcode = unpack_opcode(packet)
 
                 if opcode == DAT:
                     block_num, data = unpack_dat(packet)
-                    if block_num != next_block_num:
+                    if block_num != block_num_atual:
                         raise ProtocolError(f'Invalid block number {block_num}')
 
-                    file.write(data)
 
-                    ack = pack_ack(next_block_num)
-                    sock.sendto(ack, new_serv_addr)
+                    print(data.decode())
+                    #d=data.split("b'")
+                    #for i in d:
+                    #    print(i.strip("'"))
+                    #:rof
+
+                    ack = pack_ack(block_num_atual)
+
+                    try:
+                        sock.sendto(ack, new_serv_addr)
+                    except:
+                        #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+                        raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+                    #:yrt
 
                     if len(data) < MAX_DATA_LEN:
                         break
@@ -106,18 +350,106 @@ def get_file(serv_addr: INET4Address, filename: str):
                 else: # opcode not in (DAT, ERR):
                     raise ProtocolError(f'Invalid opcode {opcode}')
 
-                next_block_num += 1
-            #:
-        #:
-    #:
-#:
+                block_num_atual += 1
+                #:fi
+            #: elihw
+        #:htiw
+    except:
+        raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+    #:yrt
 
-# def get_file(server_add: INET4Address, filename: str):
+#:get_dir_nova
+
+
+    #####################################
+                #### rrq ####
+
+def get_file(serv_addr: INET4Address, source_name: str, dest_name: str) -> int:
+    """
+    RRQ a file given by filename from a remote TFTP server given
+    by serv_addr.
+    """
+
+    try:
+        with open(dest_name, 'wb') as file:
+            try:
+                with socket(AF_INET, SOCK_DGRAM) as sock:
+                    sock.settimeout(INACTIVITY_TIMEOUT)
+                    rrq = pack_rrq(source_name)
+
+                    try:
+                        #s_nome, s_ip = get_server_info(serv_addr[0])
+                        pass
+                    except:
+                        raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+                    #:yrt
+
+                    try:
+                        sock.sendto(rrq, serv_addr)
+                    except:
+                        #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+                        raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+                    #:yrt
+                    
+                    block_num_atual = 1
+                    tot_len = 0
+
+                    while True:
+                        try:
+                            packet, new_serv_addr = sock.recvfrom(SOCKET_BUFFER_SIZE)
+                        except:
+                            #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+                            raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+                        #:yrt
+                        
+                        opcode = unpack_opcode(packet)
+
+                        if opcode == DAT:
+                            block_num, data = unpack_dat(packet)
+                            if block_num != block_num_atual:
+                                raise ProtocolError(f'Invalid block number {block_num}')
+
+                            file.write(data)
+
+                            ack = pack_ack(block_num_atual)
+
+                            try:
+                                sock.sendto(ack, new_serv_addr)
+                            except:
+                                #raise NetworkError(f"Error reaching the server '{s_nome}' ({s_ip})")
+                                raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+                            #:yrt
+
+                            tot_len += len(data)
+
+                            if len(data) < MAX_DATA_LEN:
+                                return tot_len
+
+                        elif opcode == ERR:
+                            raise Err(*unpack_err(packet))
+
+                        else: # opcode not in (DAT, ERR):
+                            raise ProtocolError(f'Invalid opcode {opcode}')
+
+                        #:fi
+                        block_num_atual += 1
+                    #: elihw
+                #:htiw
+            except:
+                raise NetworkError(f"Error reaching the server {serv_addr[0]}")
+            #:yrt
+        #:htiw
+    except:
+        raise Err(f"Error opening the file {source_name}")
+    #:yrt
+#:get_file
+
+# def get_file(server_add: INET4Address, source_name: str, dest_name: str):
 #     """
-#     RRQ a file given by filename from a remote TFTP server given
+#     RRQ a file given by source_name from a remote TFTP server given
 #     by serv_addr.
 #     """
-# 1. Abrir ficheiro "filename" para escrita
+# 1. Abrir ficheiro "dest_name" para escrita
 #
 # 2. Criar socket DGRAM
 #
@@ -150,6 +482,16 @@ def get_file(serv_addr: INET4Address, filename: str):
 ##      PACKET PACKING AND UNPACKING
 ##
 ################################################################################
+
+def pack_dir(mode: str = DEFAULT_MODE) -> bytes:
+    if mode != 'octet':
+        raise ValueError(f'Invalid mode {mode}. Supported modes: octet.')
+
+    pack_filename = b'\x00'
+    pack_mode = mode.encode() + b'\x00'
+    pack_format = f'!H{len(pack_filename)}s{len(pack_mode)}s'
+    return struct.pack(pack_format, RRQ, pack_filename, pack_mode)
+#:
 
 def pack_rrq(filename: str, mode: str = DEFAULT_MODE) -> bytes:
     return _pack_rq(RRQ, filename, mode)
